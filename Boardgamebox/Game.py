@@ -1,4 +1,5 @@
 from random import shuffle
+from copy import deepcopy
 
 class Game(object):
     def __init__(self, cid, initiator):
@@ -8,6 +9,9 @@ class Game(object):
         self.board = None
         self.initiator = initiator
         self.dateinitvote = None
+        self.last_action = {'id': 0, 'depth': 0}
+        self.secret_actions = []
+        self.spectators = []
 
     def add_player(self, uid, player):
         self.playerlist[uid] = player
@@ -23,6 +27,13 @@ class Game(object):
             if self.playerlist[uid].role == "Fascist":
                 fascists.append(self.playerlist[uid])
         return fascists
+
+    def get_liberals(self):
+        liberals = []
+        for uid in self.playerlist:
+            if (self.playerlist[uid].role != "Fascist" and self.playerlist[uid].role != "Hitler"):
+                liberals.append(self.playerlist[uid])
+        return liberals
 
     def shuffle_player_sequence(self):
         for uid in self.playerlist:
@@ -46,3 +57,18 @@ class Game(object):
                     rtext += "(dead) "
                 rtext += "secret role was " + self.playerlist[p].role + "\n"
             return rtext
+
+    def store_last_action(self, action):
+        if self.last_action['depth'] > 2:
+            self.last_action['state'].last_action['state'].last_action = {'depth': 0}
+            self.last_action['state'].last_action['depth'] -= 1
+            self.last_action['depth'] -= 1
+        self.last_action = {'id': self.last_action['id'] + 1, 'function': action, 'state': deepcopy(self), 'depth': self.last_action['depth'] + 1}
+
+    def get_last_action(self, id):
+        if self.last_action['depth'] == 0:
+            return None
+        elif self.last_action['id'] == id:
+            return self.last_action
+        else:
+            return self.last_action['state'].get_last_action(id)

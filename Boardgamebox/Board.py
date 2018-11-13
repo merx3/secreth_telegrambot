@@ -4,10 +4,13 @@ import random
 from Boardgamebox.State import State
 
 class Board(object):
-    def __init__(self, playercount, game):
+    def __init__(self, playercount, game, removeF=False):
         self.state = State()
         self.num_players = playercount
         self.fascist_track_actions = playerSets[self.num_players]["track"]
+        while removeF:
+            policies.remove("fascist")
+            removeF -= 1
         self.policies = random.sample(policies, len(policies))
         self.game = game
         self.discards = []

@@ -1,0 +1,11 @@
+pycodestyle==2.3.1
+pylint==1.8.3
+pyparsing==2.2.0
+pytest
+pytest-cov
+setuptools>=18.5
+python-telegram-bot>=8.0.0
+requests==2.12.4
+six==1.10.0
+python-dotenv==0.9.1
+-e git+https://github.com/Derik117/ptbtest.git#egg=ptbtest

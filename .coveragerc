@@ -1,0 +1,11 @@
+[run]
+omit =
+    src/
+    tests/
+
+
+[html]
+directory = test-reports
+
+[xml]
+output = test-reports/coverage.xml

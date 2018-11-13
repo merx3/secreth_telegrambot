@@ -1,4 +1,9 @@
+
 from __future__ import absolute_import
+
+import sys
+import os
+
 import unittest
 from Commands import *
 import GamesController
@@ -19,7 +24,7 @@ from ptbtest import UserGenerator
 
 class TestCommands(unittest.TestCase):
     def setUp(self):
-        # For use within the tests we nee some stuff. Starting with a Mockbot
+        # For use within the tests we need some stuff. Starting with a Mockbot
         self.bot = Mockbot()
         # Some generators for users and chats
         self.ug = UserGenerator()
@@ -43,7 +48,7 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(len(self.bot.sent_messages), 1)
         sent = self.bot.sent_messages[0]
         self.assertEqual(sent['method'], "sendMessage")
-        self.assertEqual(sent['text'], "pong - v0.4")
+        self.assertEqual(sent['text'], "pong - spectator group")
         # Always stop the updater at the end of a testcase so it won't hang.
         self.updater.stop()
 
@@ -98,7 +103,7 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(len(self.bot.sent_messages), 1)
         sent = self.bot.sent_messages[0]
         self.assertEqual(sent['method'], "sendMessage")
-        self.assertIn("There is no running game in this chat. Please start the game with /startgame", sent['text'])
+        self.assertIn("There is no running game in this chat. Please start the game with /startgame or /startrebalanced", sent['text'])
         self.updater.stop()
 
 

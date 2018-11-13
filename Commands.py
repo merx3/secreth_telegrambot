@@ -1,6 +1,7 @@
 import json
 import logging as log
 
+import sys
 import datetime
 
 
@@ -10,11 +11,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 
 import MainController
 import GamesController
-from Constants.Config import STATS
+from Constants.Config import STATS, SPECTATORS_GROUP
 from Boardgamebox.Board import Board
 from Boardgamebox.Game import Game
 from Boardgamebox.Player import Player
 from Constants.Config import ADMIN
+from Persistence.Ranking import Ranking
 
 # Enable logging
 log.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -24,6 +26,8 @@ log.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 logger = log.getLogger(__name__)
 
 commands = [  # command description used in the "help" command
+    '/calltovote - Calls the players to vote',
+    '/spectate - See as a spectator the real actions and roles (messages recieved in admin chat only and if you are not part of the game)',
     '/help - Gives you information about the available commands',
     '/start - Gives you a short piece of information about Secret Hitler',
     '/symbols - Shows you all possible symbols of the board',
@@ -31,10 +35,13 @@ commands = [  # command description used in the "help" command
     '/newgame - Creates a new game',
     '/join - Joins an existing game',
     '/startgame - Starts an existing game when all players have joined',
+    '/startrebalanced - Starts an existing game in rebalanced mode, when all players have joined',
     '/cancelgame - Cancels an existing game. All data of the game will be lost',
     '/board - Prints the current board with fascist and liberals tracks, presidential order and election counter',
     '/votes - Prints who voted',
-    '/calltovote - Calls the players to vote'
+    '/retry - Execute again one of the last 3 game actions, resetting the board to that action\'s state. Use only for game blocking issues',
+    '/stats - Show received and played policies as claimed by players',
+    '/ranking - Show the top 5 players in the group'
 ]
 
 symbols = [
@@ -63,7 +70,7 @@ def command_board(bot, update):
         if GamesController.games[cid].board:
             bot.send_message(cid, GamesController.games[cid].board.print_board())
         else:
-            bot.send_message(cid, "There is no running game in this chat. Please start the game with /startgame")
+            bot.send_message(cid, "There is no running game in this chat. Please start the game with /startgame or /startrebalanced")
     else:
         bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
 
@@ -90,11 +97,12 @@ def command_rules(bot, update):
 # pings the bot
 def command_ping(bot, update):
     cid = update.message.chat_id
-    bot.send_message(cid, 'pong - v0.4')
+    log.info('ping called from ' + str(cid))
+    bot.send_message(cid, 'pong - spectator group')
 
 
 # prints statistics, only ADMIN
-def command_stats(bot, update):
+def command_admin_stats(bot, update):
     cid = update.message.chat_id
     if cid == ADMIN:
         with open(STATS, 'r') as f:
@@ -135,7 +143,7 @@ def command_newgame(bot, update):
             stats.get("groups").append(cid)
             with open(STATS, 'w') as f:
                 json.dump(stats, f)
-        bot.send_message(cid, "New game created! Each player has to /join the game.\nThe initiator of this game (or the admin) can /join too and type /startgame when everyone has joined the game!")
+        bot.send_message(cid, "New game created! Each player has to /join the game.\nThe initiator of this game (or the admin) can /join too and type /startgame or /startrebalanced when everyone has joined the game!")
 
 
 def command_join(bot, update):
@@ -154,7 +162,7 @@ def command_join(bot, update):
     elif update.message.from_user.id in game.playerlist:
         bot.send_message(game.cid, "You already joined the game, %s!" % fname)
     elif len(game.playerlist) >= 10:
-        bot.send_message(game.cid, "You have reached the maximum amount of players. Please start the game with /startgame!")
+        bot.send_message(game.cid, "You have reached the maximum amount of players. Please start the game with /startgame or /startrebalanced!")
     else:
         uid = update.message.from_user.id
         player = Player(fname, uid)
@@ -163,19 +171,27 @@ def command_join(bot, update):
             game.add_player(uid, player)
         except Exception:
             bot.send_message(game.cid,
-                             fname + ", I can\'t send you a private message. Please go to @thesecrethitlerbot and click \"Start\".\nYou then need to send /join again.")
+                             fname + ", I can\'t send you a private message. Please go to @secrectfascistbr_bot and click \"Start\".\nYou then need to send /join again.")
         else:
             log.info("%s (%d) joined a game in %d" % (fname, uid, game.cid))
+            try:
+                bot.kick_chat_member(SPECTATORS_GROUP, uid, 30)
+            except:
+                log.error("Unable to ban user " + fname + ", " + sys.exc_info()[0])
+                bot.send_message(SPECTATORS_GROUP, "%s, you joined a game but I couldn't kick you from the spectators group. "
+                                                   "Please leave the chat to prevent cheating" % fname)
             if len(game.playerlist) > 4:
-                bot.send_message(game.cid, fname + " has joined the game. Type /startgame if this was the last player and you want to start with %d players!" % len(game.playerlist))
+                bot.send_message(game.cid, fname + " has joined the game. Type /startgame or /startrebalanced if this was the last player and you want to start with %d players!" % len(game.playerlist))
             elif len(game.playerlist) == 1:
                 bot.send_message(game.cid, "%s has joined the game. There is currently %d player in the game and you need 5-10 players." % (fname, len(game.playerlist)))
             else:
                 bot.send_message(game.cid, "%s has joined the game. There are currently %d players in the game and you need 5-10 players." % (fname, len(game.playerlist)))
 
 
-def command_startgame(bot, update):
+def command_startgame(bot, update, rebalance=False):
     log.info('command_startgame called')
+    log.info(bot)
+    log.info(update)
     cid = update.message.chat_id
     game = GamesController.games.get(cid, None)
     if not game:
@@ -183,14 +199,29 @@ def command_startgame(bot, update):
     elif game.board:
         bot.send_message(cid, "The game is already running!")
     elif update.message.from_user.id != game.initiator and bot.getChatMember(cid, update.message.from_user.id).status not in ("administrator", "creator"):
-        bot.send_message(game.cid, "Only the initiator of the game or a group admin can start the game with /startgame")
+        bot.send_message(game.cid, "Only the initiator of the game or a group admin can start the game with /startgame or /startrebalanced")
     elif len(game.playerlist) < 5:
         bot.send_message(game.cid, "There are not enough players (min. 5, max. 10). Join the game with /join")
     else:
         player_number = len(game.playerlist)
         MainController.inform_players(bot, game, game.cid, player_number)
         MainController.inform_fascists(bot, game, player_number)
-        game.board = Board(player_number, game)
+        if rebalance and len(game.playerlist) == 6:
+            bot.send_message(cid,
+                             "Game started in rebalanced mode. One F will be played at the start to help the poor helpless fascists.")
+            game.board = Board(player_number, game)
+            game.board.state.player_claims.append(['F elected at start of game'])
+            game.board.state.fascist_track += 1
+        elif rebalance and len(game.playerlist) in [7, 9]:
+            removeF = 1 if len(game.playerlist) == 7 else 2
+            label = "policy" if removeF == 1 else "policies"
+            bot.send_message(cid,
+                             "Game started in rebalanced mode. %d F %s will be removed from the deck for this game, so the liberals at least have a chancce now."
+                             % (removeF, label))
+            game.board = Board(player_number, game, removeF)
+            game.board.state.player_claims.append(["%d F %s removed from deck" % (removeF, label)])
+        else:
+            game.board = Board(player_number, game)
         log.info(game.board)
         log.info("len(games) Command_startgame: " + str(len(GamesController.games)))
         game.shuffle_player_sequence()
@@ -199,6 +230,11 @@ def command_startgame(bot, update):
         #group_name = update.message.chat.title
         #bot.send_message(ADMIN, "Game of Secret Hitler started in group %s (%d)" % (group_name, cid))
         MainController.start_round(bot, game)
+
+
+def command_startgame_rebalanced(bot, update):
+    command_startgame(bot, update, True)
+
 
 def command_cancelgame(bot, update):
     log.info('command_cancelgame called')
@@ -247,6 +283,36 @@ def command_votes(bot, update):
         bot.send_message(cid, str(e))
 
 
+def DEL_command_calltokill(bot, update):
+    try:
+        #Send message of executing command
+        cid = update.message.chat_id
+        #bot.send_message(cid, "Looking for history...")
+        #Check if there is a current game
+        if cid in GamesController.games.keys():
+            game = GamesController.games.get(cid, None)
+            if not game.dateinitvote:
+                # If date of init vote is null, then the voting didnt start
+                bot.send_message(cid, "The voting didn't start yet.")
+            else:
+                #If there is a time, compare it and send history of votes.
+                start = game.dateinitvote
+                stop = datetime.datetime.now()
+                elapsed = stop - start
+                if elapsed > datetime.timedelta(minutes=1):
+                    # Only remember to vote to players that are still in the game
+                    for player in game.player_sequence:
+                        # If the player is not in last_votes send him reminder
+                        if player.uid in game.board.state.last_votes:
+                            MainController.choose_kill(bot, update, player.uid)
+                else:
+                    bot.send_message(cid, "10 minutes must pass to kill lazies")
+        else:
+            bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
+    except Exception as e:
+        bot.send_message(cid, str(e))
+
+
 def command_calltovote(bot, update):
     try:
         #Send message of executing command
@@ -277,3 +343,75 @@ def command_calltovote(bot, update):
             bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
     except Exception as e:
         bot.send_message(cid, str(e))
+
+def command_retry(bot, update):
+    log.info('command_retry called')
+    cid = update.message.chat_id
+    user = update.message.from_user
+    if cid in GamesController.games.keys():
+        game = GamesController.games[cid]
+        if game.last_action['depth'] == 0:
+            bot.send_message(game.cid,
+                             "There was no repeatable action executed yet!")
+        else:
+            status = bot.getChatMember(cid, user.id).status
+            if user.id == game.initiator or status in ("administrator", "creator"):
+                bot.send_message(game.cid,
+                                 ("Attempt to repeat one of the 3 last actions was initiated by %s. The game will be reset to that action's state, please wait.\n"
+                                 "%s, please go to our private chat and choose an action to retry.") % (user.first_name, user.first_name))
+                MainController.retry_last_command(bot, game, user.id)
+            else:
+                bot.send_message(cid, "Only the initiator of the game or a group admin can reset the game's last action with /retry")
+    else:
+        bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
+
+
+def command_ranking(bot, update):
+    cid = update.message.chat_id
+    bot.send_message(cid, text=Ranking().print_ranking(cid), parse_mode=ParseMode.MARKDOWN)
+
+
+def command_stats(bot, update):
+    log.info('command_stats called')
+    cid = update.message.chat_id
+    if cid in GamesController.games.keys():
+        game = GamesController.games[cid]
+        if len(game.board.state.player_claims) == 0:
+            stats = 'No stats available'
+        else:
+            stats = "Players stats:"
+            for claim in game.board.state.player_claims:
+                if len(claim) >= 1:
+                    stats += "\n" + " ".join(claim)
+        bot.send_message(game.cid, stats)
+    else:
+        bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
+
+
+def command_spectate(bot, update):
+    log.info('command_spectate called')
+    cid = update.message.chat_id
+    if cid in GamesController.games.keys():
+        game = GamesController.games[cid]
+        if game.board:
+            uid = update.message.from_user.id
+            fname = update.message.from_user.first_name
+            if uid in game.playerlist and not game.playerlist[uid].is_dead:
+                bot.send_message(cid, "No cheating, %s!" % fname)
+            elif uid in game.spectators:
+                bot.send_message(cid, "You're already a spectator, %s. Wait for new actions" % fname)
+            else:
+                bot.send_message(uid, MainController.join_spectate(game, uid))
+        else:
+            bot.send_message(cid, "There is no running game in this chat. Please start the game with /startgame or /startrebalanced")
+    else:
+        bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
+
+
+def command_heudon(bot, update):
+    log.info('command_heudon called')
+    cid = update.message.chat_id
+    uid = update.message.from_user.id
+    fname = update.message.from_user.first_name
+    if uid != 575538231:
+        bot.send_message(cid, "You all are playing like F\nI'm the only L in this game\nNein\nNein\nkoeskoskooeaskoskke")

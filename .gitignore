@@ -1,0 +1,9 @@
+*.pyc
+.idea
+__pycache__
+game.db
+.pytest_cache/
+src
+test-reports
+junit.xml
+.coverage
