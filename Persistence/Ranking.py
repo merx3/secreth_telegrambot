@@ -30,9 +30,9 @@ class Ranking(object):
 
     def update_ranking(self, group_id, players, is_liberal):
         c = self.conn.cursor()
-        group = 'fascist = fascist + 1.3'
+        group = 'fascist = fascist + 1'
         if is_liberal:
-            group = 'liberal = liberal + 1.3'
+            group = 'liberal = liberal + 1'
 
         for player in players:
             self.add_player(group_id, player)
