@@ -766,11 +766,11 @@ def end_game(bot, game, game_endcode):
             bot.send_message(game.cid, "Game cancelled!")
     else:
         ranking = Ranking()
-        ranking.decay_non_active(game.cid)
-        for uid in game.playerlist:
-            player = game.playerlist[uid]
-            ranking.increment_game(game.cid, player)
-            log.info("Incrementing quantity of games for %s" % player.name)
+        # ranking.decay_non_active(game.cid)
+        # for uid in game.playerlist:
+        #     player = game.playerlist[uid]
+        #     ranking.increment_game(game.cid, player)
+        #     log.info("Incrementing quantity of games for %s" % player.name)
         fascists_players = game.get_fascists() + [game.get_hitler()]
         if game_endcode == -2:
             bot.send_message(game.cid,
