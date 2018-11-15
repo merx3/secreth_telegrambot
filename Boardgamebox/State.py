@@ -17,3 +17,6 @@ class State(object):
         self.veto_refused = False
         self.not_hitlers = []
         self.player_claims = []
+        self.punish_players = {}
+        self.punish_history = []
+        self.vote_message_ids = {}

@@ -98,7 +98,7 @@ def command_rules(bot, update):
 def command_ping(bot, update):
     cid = update.message.chat_id
     log.info('ping called from ' + str(cid))
-    bot.send_message(cid, 'pong - spectator group')
+    bot.send_message(cid, 'pong - The Punisher')
 
 
 # prints statistics, only ADMIN
@@ -343,6 +343,41 @@ def command_calltovote(bot, update):
             bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
     except Exception as e:
         bot.send_message(cid, str(e))
+
+
+def command_calltopunish(bot, update):
+    log.info('command_calltopunish called')
+    cid = update.message.chat_id
+    if cid in GamesController.games.keys():
+        game = GamesController.games.get(cid, None)
+        if not game.dateinitvote:
+            # If date of init vote is null, then the voting didnt start
+            bot.send_message(cid, "The voting didn't start yet.")
+        else:
+            # If there is a time, compare it and start punishment voting
+            start = game.dateinitvote
+            stop = datetime.datetime.now()
+            elapsed = stop - start
+            if elapsed < datetime.timedelta(hours=1):
+                bot.send_message(cid, "One hour must pass to punish inactive voters")
+            elif game.board.state.punish_players:
+                voters_text = "There's already a punish vote going.\n"
+                # list the people that still need to vote for punishment to pass
+                for p_uid in game.board.state.punish_players:
+                    voters_text += "Votes for punishing %s:\n" % game.playerlist[p_uid].name
+                    for uid in game.board.state.punish_players[p_uid]:
+                        vote = game.board.state.punish_players[p_uid][uid]
+                        if vote == "Ja" or vote == "Nein":
+                            voters_text += "  %s registered a vote!\n" % game.playerlist[uid].name
+                        else:
+                            voters_text += "  %s didn't register a vote\n" % game.playerlist[uid].name
+                bot.send_message(cid, voters_text)
+            else:
+                MainController.vote_punish(bot, game)
+                bot.send_message(cid, "A vote to punish inactive voter(s) was initiated.")
+    else:
+        bot.send_message(cid, "There is no game in this chat. Create a new game with /newgame")
+
 
 def command_retry(bot, update):
     log.info('command_retry called')
