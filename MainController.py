@@ -237,24 +237,27 @@ def voting_aftermath(bot, game, voting_success):
 
 def vote_punish(bot, game):
     log.info('vote_punish called')
-    game.store_last_action(vote_punish)
-    # Only players that have already voted can vote for punishment
-    players_who_voted = []
-    for player in game.player_sequence:
-        if player.uid in game.board.state.last_votes:
-            players_who_voted.append(player.uid)
-        else:
-            game.board.state.punish_players[player.uid] = {}
-    strcid = str(game.cid)
-    for uid in players_who_voted:
-        for p_uid in game.board.state.punish_players:
-            btns = [[InlineKeyboardButton("Ja", callback_data=strcid + "_" + p_uid + "_Ja"),
-                     InlineKeyboardButton("Nein", callback_data=strcid + "_" + p_uid + "_Nein")]]
-            voteMarkup = InlineKeyboardMarkup(btns)
-            message = bot.send_message(uid,
-                             "Do you want to punish %s?" % game.playerlist[uid].name,
-                             reply_markup=voteMarkup)
-            game.board.state.punish_players[p_uid][uid] = message.message_id
+    try:
+        game.store_last_action(vote_punish)
+        # Only players that have already voted can vote for punishment
+        players_who_voted = []
+        for player in game.player_sequence:
+            if player.uid in game.board.state.last_votes:
+                players_who_voted.append(player.uid)
+            else:
+                game.board.state.punish_players[player.uid] = {}
+        strcid = str(game.cid)
+        for uid in players_who_voted:
+            for p_uid in game.board.state.punish_players:
+                btns = [[InlineKeyboardButton("Ja", callback_data=strcid + "_" + p_uid + "_Ja"),
+                         InlineKeyboardButton("Nein", callback_data=strcid + "_" + p_uid + "_Nein")]]
+                voteMarkup = InlineKeyboardMarkup(btns)
+                message = bot.send_message(uid,
+                                 "Do you want to punish %s?" % game.playerlist[uid].name,
+                                 reply_markup=voteMarkup)
+                game.board.state.punish_players[p_uid][uid] = message.message_id
+    except Exception as e:
+        log.error("vote_punish error: " + str(e))
 
 
 def handle_vote_punish(bot, update):
@@ -279,87 +282,96 @@ def handle_vote_punish(bot, update):
             game.board.state.punish_players[p_uid][uid] = answer
             count_punish_votes(bot, game, p_uid)
     except:
-        log.error("handle_vote_punish: Game or board should not be None!")
+        log.error("handle_vote_punish: Game or board should not be None! " + str(e))
 
 
 def count_punish_votes(bot, game, p_uid):
     log.info('count_punish_votes called')
     num_votes = {"Ja": 0, "Nein": 0}
     voting_text = ""
-    for uid in game.board.state.punish_players[p_uid]:
-        answer = game.board.state.punish_players[p_uid][uid]
-        if answer == "Ja":
-            voting_text += game.playerlist[uid].name + " voted Ja!\n"
-            num_votes["Ja"] += 1
-        elif answer == "Nein":
-            voting_text += game.playerlist[uid].name + " voted Nein!\n"
-            num_votes["Nein"] += 1
-    if len(game.board.state.punish_players[p_uid]) == num_votes["Ja"] + num_votes["Nein"]:
-        log.info("Punishment voting ended")
-        del game.board.state.punish_players[p_uid]
-        if num_votes["Ja"] > num_votes["Nein"]:
-            voting_text += "The punishment for %s passed!\n" % game.playerlist[p_uid].name
-            game.board.state.punish_history.append(p_uid)
-            punish_number = game.board.state.punish_history.count(p_uid)
-            if punish_number > 2:
-                voting_text += "Punishment: Death!\nThe presidency will be canceled! (does not count as failed)"
+    try:
+        for uid in game.board.state.punish_players[p_uid]:
+            answer = game.board.state.punish_players[p_uid][uid]
+            if answer == "Ja":
+                voting_text += game.playerlist[uid].name + " voted Ja!\n"
+                num_votes["Ja"] += 1
+            elif answer == "Nein":
+                voting_text += game.playerlist[uid].name + " voted Nein!\n"
+                num_votes["Nein"] += 1
+        if len(game.board.state.punish_players[p_uid]) == num_votes["Ja"] + num_votes["Nein"]:
+            log.info("Punishment voting ended")
+            del game.board.state.punish_players[p_uid]
+            if num_votes["Ja"] > num_votes["Nein"]:
+                voting_text += "The punishment for %s passed!\n" % game.playerlist[p_uid].name
+                game.board.state.punish_history.append(p_uid)
+                punish_number = game.board.state.punish_history.count(p_uid)
+                if punish_number > 2:
+                    voting_text += "Punishment: Death!\nThe presidency will be canceled! (does not count as failed)"
+                    bot.send_message(game.cid, voting_text)
+                    punished_player = game.playerlist[p_uid]
+                    punished_player.is_dead = True
+                    if game.player_sequence.index(punished_player) <= game.board.state.player_counter:
+                        game.board.state.player_counter -= 1
+                    game.player_sequence.remove(punished_player)
+                    game.board.state.dead += 1
+                    game.board.state.player_claims.append(
+                        ["%s was killed as a punishment" % punished_player.name])
+                    log.info("Player %s (%d) was killed as a punishment" % (
+                        punished_player.name, punished_player.uid))
+                    try:
+                        bot.unban_chat_member(SPECTATORS_GROUP, p_uid)
+                    except:
+                        log.error("Unable to remove ban for user " + punished_player.name + ", " + sys.exc_info()[0])
+                        bot.send_message(SPECTATORS_GROUP,
+                                         "%s, couldn't be unbanned. "
+                                         "Check with admin how to unban him so he can join spectator group" % punished_player.name)
+                    if punished_player.role == "Hitler":
+                        end_game(bot, game, 2)
+                    else:
+                        log.info("Presidency was canceled: punishment for AFK")
+                        cancel_presidency(bot, game)
+                elif punish_number == 2:
+                    voting_text += "Punishment: random vote.\nNext punishment: Death!"
+                    bot.send_message(game.cid, voting_text)
+                    force_vote(bot, game, p_uid)
+                elif punish_number == 1:
+                    voting_text += "Punishment: random vote.\nNext punishment: random vote."
+                    bot.send_message(game.cid, voting_text)
+                    force_vote(bot, game, p_uid)
+            else:
+                voting_text += "No punishment for %s!" % game.playerlist[p_uid].name
                 bot.send_message(game.cid, voting_text)
-                punished_player = game.playerlist[p_uid]
-                punished_player.is_dead = True
-                if game.player_sequence.index(punished_player) <= game.board.state.player_counter:
-                    game.board.state.player_counter -= 1
-                game.player_sequence.remove(punished_player)
-                game.board.state.dead += 1
-                game.board.state.player_claims.append(
-                    ["%s was killed as a punishment" % punished_player.name])
-                log.info("Player %s (%d) was killed as a punishment" % (
-                    punished_player.name, punished_player.uid))
-                try:
-                    bot.unban_chat_member(SPECTATORS_GROUP, p_uid)
-                except:
-                    log.error("Unable to remove ban for user " + punished_player.name + ", " + sys.exc_info()[0])
-                    bot.send_message(SPECTATORS_GROUP,
-                                     "%s, couldn't be unbanned. "
-                                     "Check with admin how to unban him so he can join spectator group" % punished_player.name)
-                if punished_player.role == "Hitler":
-                    end_game(bot, game, 2)
-                else:
-                    log.info("Presidency was canceled: punishment for AFK")
-                    cancel_presidency(bot, game)
-            elif punish_number == 2:
-                voting_text += "Punishment: random vote.\nNext punishment: Death!"
-                bot.send_message(game.cid, voting_text)
-                force_vote(bot, game, p_uid)
-            elif punish_number == 1:
-                voting_text += "Punishment: random vote.\nNext punishment: random vote."
-                bot.send_message(game.cid, voting_text)
-                force_vote(bot, game, p_uid)
-        else:
-            voting_text += "No punishment for %s!" % game.playerlist[p_uid].name
-            bot.send_message(game.cid, voting_text)
+    except Exception as e:
+        log.error("count_punish_votes error: " + str(e))
 
 
 def force_vote(bot, game, uid):
-    update = Dummy()
-    update.callback_query = Dummy()
-    strcid = str(game.cid)
-    rand_action = random.choice([strcid + "_Ja", strcid + "_Nein"])
-    update.callback_query.data = rand_action
-    update.callback_query.from_user = Dummy()
-    update.callback_query.from_user.id = uid
-    update.callback_query.from_user.first_name = game.playerlist[uid].name
-    update.callback_query.message = Dummy()
-    update.callback_query.message.message_id = game.board.state.vote_message_ids[uid]
-    handle_voting(bot, update)
+    try:
+        update = Dummy()
+        update.callback_query = Dummy()
+        strcid = str(game.cid)
+        rand_action = random.choice([strcid + "_Ja", strcid + "_Nein"])
+        update.callback_query.data = rand_action
+        update.callback_query.from_user = Dummy()
+        update.callback_query.from_user.id = uid
+        update.callback_query.from_user.first_name = game.playerlist[uid].name
+        update.callback_query.message = Dummy()
+        update.callback_query.message.message_id = game.board.state.vote_message_ids[uid]
+        handle_voting(bot, update)
+    except Exception as e:
+        log.error("force_vote error: " + str(e))
 
 
 def cancel_presidency(bot, game):
-    for uid in game.board.state.vote_message_ids:
-        bot.edit_message_text("Voting canceled.",
-                              uid, game.board.state.vote_message_ids[uid])
-    game.board.state.nominated_president = None
-    game.board.state.nominated_chancellor = None
-    voting_aftermath(bot, game, False)
+    try:
+        for uid in game.board.state.vote_message_ids:
+            bot.edit_message_text("Voting canceled.",
+                                  uid, game.board.state.vote_message_ids[uid])
+        game.board.state.nominated_president = None
+        game.board.state.nominated_chancellor = None
+        voting_aftermath(bot, game, False)
+    except Exception as e:
+        log.error("cancel_presidency error: " + str(e))
 
 
 def draw_policies(bot, game):
