@@ -249,11 +249,11 @@ def vote_punish(bot, game):
         strcid = str(game.cid)
         for uid in players_who_voted:
             for p_uid in game.board.state.punish_players:
-                btns = [[InlineKeyboardButton("Ja", callback_data=strcid + "_" + p_uid + "_Ja"),
-                         InlineKeyboardButton("Nein", callback_data=strcid + "_" + p_uid + "_Nein")]]
+                btns = [[InlineKeyboardButton("Ja", callback_data=strcid + "_" + str(p_uid) + "_Ja"),
+                         InlineKeyboardButton("Nein", callback_data=strcid + "_" + str(p_uid) + "_Nein")]]
                 voteMarkup = InlineKeyboardMarkup(btns)
                 message = bot.send_message(uid,
-                                 "Do you want to punish %s?" % game.playerlist[uid].name,
+                                 "Do you want to punish %s?" % game.playerlist[p_uid].name,
                                  reply_markup=voteMarkup)
                 game.board.state.punish_players[p_uid][uid] = message.message_id
     except Exception as e:
@@ -293,10 +293,8 @@ def count_punish_votes(bot, game, p_uid):
         for uid in game.board.state.punish_players[p_uid]:
             answer = game.board.state.punish_players[p_uid][uid]
             if answer == "Ja":
-                voting_text += game.playerlist[uid].name + " voted Ja!\n"
                 num_votes["Ja"] += 1
             elif answer == "Nein":
-                voting_text += game.playerlist[uid].name + " voted Nein!\n"
                 num_votes["Nein"] += 1
         if len(game.board.state.punish_players[p_uid]) == num_votes["Ja"] + num_votes["Nein"]:
             log.info("Punishment voting ended")
