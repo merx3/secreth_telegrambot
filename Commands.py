@@ -27,6 +27,7 @@ logger = log.getLogger(__name__)
 
 commands = [  # command description used in the "help" command
     '/calltovote - Calls the players to vote',
+    '/calltopunish - Calls the players who voted to punish the players who didn\'t',
     '/spectate - See as a spectator the real actions and roles (messages recieved in admin chat only and if you are not part of the game)',
     '/help - Gives you information about the available commands',
     '/start - Gives you a short piece of information about Secret Hitler',
@@ -98,7 +99,7 @@ def command_rules(bot, update):
 def command_ping(bot, update):
     cid = update.message.chat_id
     log.info('ping called from ' + str(cid))
-    bot.send_message(cid, 'pong - The Punisher')
+    bot.send_message(cid, 'pong - The Punisher 2')
 
 
 # prints statistics, only ADMIN

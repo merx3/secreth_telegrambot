@@ -48,7 +48,7 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(len(self.bot.sent_messages), 1)
         sent = self.bot.sent_messages[0]
         self.assertEqual(sent['method'], "sendMessage")
-        self.assertEqual(sent['text'], "pong - The Punisher")
+        self.assertEqual(sent['text'], "pong - The Punisher 2")
         # Always stop the updater at the end of a testcase so it won't hang.
         self.updater.stop()
 
