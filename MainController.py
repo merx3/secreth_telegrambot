@@ -23,6 +23,11 @@ import GamesController
 
 import datetime
 
+
+class Dummy:
+    pass
+
+
 # Enable logging
 log.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 level=log.INFO)
@@ -139,10 +144,11 @@ def vote(bot, game):
             if game.playerlist[uid] is not game.board.state.nominated_president:
                 # the nominated president already got the board before nominating a chancellor
                 bot.send_message(uid, game.board.print_board())
-            bot.send_message(uid,
+            message = bot.send_message(uid,
                              "Do you want to elect President %s and Chancellor %s?" % (
                                  game.board.state.nominated_president.name, game.board.state.nominated_chancellor.name),
                              reply_markup=voteMarkup)
+            game.board.state.vote_message_ids[uid] = message.message_id
 
 
 def handle_voting(bot, update):
@@ -158,6 +164,8 @@ def handle_voting(bot, update):
             answer, game.board.state.nominated_president.name, game.board.state.nominated_chancellor.name), uid,
                               callback.message.message_id)
         log.info("Player %s (%d) voted %s" % (callback.from_user.first_name, uid, answer))
+        if uid in game.board.state.punish_players:
+            del game.board.state.punish_players[uid]
         if uid not in game.board.state.last_votes:
             game.board.state.last_votes[uid] = answer
         if len(game.board.state.last_votes) == len(game.player_sequence):
@@ -225,6 +233,145 @@ def voting_aftermath(bot, game, voting_success):
     else:
         bot.send_message(game.cid, game.board.print_board())
         start_next_round(bot, game)
+
+
+def vote_punish(bot, game):
+    log.info('vote_punish called')
+    try:
+        game.store_last_action(vote_punish)
+        # Only players that have already voted can vote for punishment
+        players_who_voted = []
+        for player in game.player_sequence:
+            if player.uid in game.board.state.last_votes:
+                players_who_voted.append(player.uid)
+            else:
+                game.board.state.punish_players[player.uid] = {}
+        strcid = str(game.cid)
+        for uid in players_who_voted:
+            for p_uid in game.board.state.punish_players:
+                btns = [[InlineKeyboardButton("Ja", callback_data=strcid + "_" + p_uid + "_Ja"),
+                         InlineKeyboardButton("Nein", callback_data=strcid + "_" + p_uid + "_Nein")]]
+                voteMarkup = InlineKeyboardMarkup(btns)
+                message = bot.send_message(uid,
+                                 "Do you want to punish %s?" % game.playerlist[uid].name,
+                                 reply_markup=voteMarkup)
+                game.board.state.punish_players[p_uid][uid] = message.message_id
+    except Exception as e:
+        log.error("vote_punish error: " + str(e))
+
+
+def handle_vote_punish(bot, update):
+    callback = update.callback_query
+    log.info('handle_vote_punish called: %s' % callback.data)
+    regex = re.search("(-[0-9]*)_(.*)_(.*)", callback.data)
+    cid = int(regex.group(1))
+    p_uid = int(regex.group(2))
+    answer = regex.group(3)
+    try:
+        game = GamesController.games[cid]
+        uid = callback.from_user.id
+        punish_player = game.playerlist[p_uid]
+        if p_uid not in game.board.state.punish_players:
+            bot.edit_message_text("Sorry, %s's punishment was canceled" % punish_player.name,
+                                  uid, callback.message.message_id)
+        else:
+            bot.edit_message_text("Thank you for your vote '%s' to punish %s" % (answer, punish_player.name),
+                                  uid, callback.message.message_id)
+            log.info("Player %s (%d) voted for %s's punishment: %s" %
+                     (callback.from_user.first_name, uid, punish_player.name, answer))
+            game.board.state.punish_players[p_uid][uid] = answer
+            count_punish_votes(bot, game, p_uid)
+    except:
+        log.error("handle_vote_punish: Game or board should not be None! " + str(e))
+
+
+def count_punish_votes(bot, game, p_uid):
+    log.info('count_punish_votes called')
+    num_votes = {"Ja": 0, "Nein": 0}
+    voting_text = ""
+    try:
+        for uid in game.board.state.punish_players[p_uid]:
+            answer = game.board.state.punish_players[p_uid][uid]
+            if answer == "Ja":
+                voting_text += game.playerlist[uid].name + " voted Ja!\n"
+                num_votes["Ja"] += 1
+            elif answer == "Nein":
+                voting_text += game.playerlist[uid].name + " voted Nein!\n"
+                num_votes["Nein"] += 1
+        if len(game.board.state.punish_players[p_uid]) == num_votes["Ja"] + num_votes["Nein"]:
+            log.info("Punishment voting ended")
+            del game.board.state.punish_players[p_uid]
+            if num_votes["Ja"] > num_votes["Nein"]:
+                voting_text += "The punishment for %s passed!\n" % game.playerlist[p_uid].name
+                game.board.state.punish_history.append(p_uid)
+                punish_number = game.board.state.punish_history.count(p_uid)
+                if punish_number > 2:
+                    voting_text += "Punishment: Death!\nThe presidency will be canceled! (does not count as failed)"
+                    bot.send_message(game.cid, voting_text)
+                    punished_player = game.playerlist[p_uid]
+                    punished_player.is_dead = True
+                    if game.player_sequence.index(punished_player) <= game.board.state.player_counter:
+                        game.board.state.player_counter -= 1
+                    game.player_sequence.remove(punished_player)
+                    game.board.state.dead += 1
+                    game.board.state.player_claims.append(
+                        ["%s was killed as a punishment" % punished_player.name])
+                    log.info("Player %s (%d) was killed as a punishment" % (
+                        punished_player.name, punished_player.uid))
+                    try:
+                        bot.unban_chat_member(SPECTATORS_GROUP, p_uid)
+                    except:
+                        log.error("Unable to remove ban for user " + punished_player.name + ", " + sys.exc_info()[0])
+                        bot.send_message(SPECTATORS_GROUP,
+                                         "%s, couldn't be unbanned. "
+                                         "Check with admin how to unban him so he can join spectator group" % punished_player.name)
+                    if punished_player.role == "Hitler":
+                        end_game(bot, game, 2)
+                    else:
+                        log.info("Presidency was canceled: punishment for AFK")
+                        cancel_presidency(bot, game)
+                elif punish_number == 2:
+                    voting_text += "Punishment: random vote.\nNext punishment: Death!"
+                    bot.send_message(game.cid, voting_text)
+                    force_vote(bot, game, p_uid)
+                elif punish_number == 1:
+                    voting_text += "Punishment: random vote.\nNext punishment: random vote."
+                    bot.send_message(game.cid, voting_text)
+                    force_vote(bot, game, p_uid)
+            else:
+                voting_text += "No punishment for %s!" % game.playerlist[p_uid].name
+                bot.send_message(game.cid, voting_text)
+    except Exception as e:
+        log.error("count_punish_votes error: " + str(e))
+
+
+def force_vote(bot, game, uid):
+    try:
+        update = Dummy()
+        update.callback_query = Dummy()
+        strcid = str(game.cid)
+        rand_action = random.choice([strcid + "_Ja", strcid + "_Nein"])
+        update.callback_query.data = rand_action
+        update.callback_query.from_user = Dummy()
+        update.callback_query.from_user.id = uid
+        update.callback_query.from_user.first_name = game.playerlist[uid].name
+        update.callback_query.message = Dummy()
+        update.callback_query.message.message_id = game.board.state.vote_message_ids[uid]
+        handle_voting(bot, update)
+    except Exception as e:
+        log.error("force_vote error: " + str(e))
+
+
+def cancel_presidency(bot, game):
+    try:
+        for uid in game.board.state.vote_message_ids:
+            bot.edit_message_text("Voting canceled.",
+                                  uid, game.board.state.vote_message_ids[uid])
+        game.board.state.nominated_president = None
+        game.board.state.nominated_chancellor = None
+        voting_aftermath(bot, game, False)
+    except Exception as e:
+        log.error("cancel_presidency error: " + str(e))
 
 
 def draw_policies(bot, game):
@@ -445,9 +592,9 @@ def enact_policy(bot, game, policy, anarchy):
         end_game(bot, game, game.board.state.game_endcode)  # fascists win with 6 fascist policies
     sleep(3)
     # End of legislative session, shuffle if necessary
+    claim_id = len(game.board.state.player_claims) - 1
     shuffle_policy_pile(bot, game)
     if not anarchy:
-        claim_id = len(game.board.state.player_claims) - 1
         send_claim_message(bot, game, game.board.state.president.uid, claim_id, ["FFF", "FFL", "FLL", "LLL"],
                            "Select what you want to say that you drew.")
         send_claim_message(bot, game, game.board.state.chancellor.uid, claim_id, ["FF", "FL", "LL"],
@@ -972,6 +1119,7 @@ def main():
     dp.add_handler(CommandHandler("votes", Commands.command_votes))
     dp.add_handler(CommandHandler("calltovote", Commands.command_calltovote))
     # dp.add_handler(CommandHandler("calltokill", Commands.command_calltokill))
+    dp.add_handler(CommandHandler("calltopunish", Commands.command_calltopunish))
     dp.add_handler(CommandHandler("retry", Commands.command_retry))
     dp.add_handler(CommandHandler("stats", Commands.command_stats))
     dp.add_handler(CommandHandler("ranking", Commands.command_ranking))
@@ -983,6 +1131,7 @@ def main():
     dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_(yesveto|noveto)", callback=choose_veto))
     dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_(liberal|fascist|veto)", callback=choose_policy))
     dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_(Ja|Nein)", callback=handle_voting))
+    dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_(.*)_(Ja|Nein)", callback=handle_vote_punish))
     dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_retry_(.*)", callback=choose_retry))
     dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_claim_(.*)", callback=choose_claim))
     dp.add_handler(CallbackQueryHandler(pattern="(-[0-9]*)_claimorder_(.*)", callback=choose_claim_order))
